@@ -1,7 +1,15 @@
 import discord
 from discord.ext import commands
+import json
+import requests
+import base64
 
 TOKEN = 'test'
+GITHUB_API_URL = 'test'
+GITHUB_API_HEADERS = {
+    'Authorization': 'token',
+    'Accept': 'application/vnd.github.v3+json'
+}
 
 intents = discord.Intents.default()
 intents.reactions = True
@@ -12,10 +20,36 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
+leaderboard = {}
+
+async def load_leaderboard():
+    global leaderboard
+    try:
+        response = requests.get(GITHUB_API_URL, headers=GITHUB_API_HEADERS)
+        response.raise_for_status()
+        leaderboard = json.loads(base64.b64decode(response.json()['content']).decode('utf-8'))
+    except Exception as e:
+        print(f"Failed to load leaderboard: {e}")
+
+async def save_leaderboard():
+    try:
+        content = json.dumps(leaderboard, indent=4).encode('utf-8')
+        data = {
+            "message": "Update leaderboard",
+            "content": base64.b64encode(content).decode('utf-8'),
+            "sha": response.json()['sha']
+        }
+        response = requests.put(GITHUB_API_URL, headers=GITHUB_API_HEADERS, json=data)
+        response.raise_for_status()
+        print("Leaderboard saved successfully.")
+    except Exception as e:
+        print(f"Failed to save leaderboard: {e}")
+
 @bot.event
 async def on_ready():
     await bot.change_presence(activity=discord.Game(name="Gok Bot Z: Extreme Butōden"))
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
+    await load_leaderboard()
 
 @bot.event
 async def on_message(message):
@@ -49,15 +83,14 @@ async def list_roles(ctx):
 
 @bot.command(name='add')
 async def add_points(ctx, member: discord.Member, points: int):
-    leaderboard = {}  # Assuming you want to reset leaderboard each time bot restarts
     if member.id not in leaderboard:
         leaderboard[member.id] = 0
     leaderboard[member.id] += points
     await ctx.send(f'Added {points} points to {member.display_name}. Total points: {leaderboard[member.id]}')
+    await save_leaderboard()  # Save leaderboard after updating
 
 @bot.command(name='leaderboard')
 async def show_leaderboard(ctx):
-    leaderboard = {}  # Assuming you want to reset leaderboard each time bot restarts
     if not leaderboard:
         await ctx.send("The leaderboard is empty.")
         return
@@ -65,8 +98,12 @@ async def show_leaderboard(ctx):
     sorted_leaderboard = sorted(leaderboard.items(), key=lambda x: x[1], reverse=True)
     message = "Leaderboard:\n"
     for i, (user_id, points) in enumerate(sorted_leaderboard, start=1):
-        user = await bot.fetch_user(user_id)
-        message += f"{i}. {user.display_name} - {points} points\n"
+        try:
+            user = await bot.fetch_user(user_id)
+            message += f"{i}. {user.display_name} - {points} points\n"
+        except Exception as e:
+            print(f"Failed to fetch user {user_id}: {e}")
+            message += f"{i}. User not found - {points} points\n"
     await ctx.send(message)
 
 @bot.event
